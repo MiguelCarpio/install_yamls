@@ -1,0 +1,189 @@
+---
+# Separate MetalLB pools for multi-RHOSO
+# Uses different pool names per instance
+# Requires patching OpenStack service annotations
+
+# OpenStack Instance 1 pools
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: openstack-ctlplane
+  namespace: metallb-system
+spec:
+  addresses:
+  - 192.168.122.80-192.168.122.90
+  serviceAllocation:
+    namespaces:
+    - openstack
+---
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: openstack-internalapi
+  namespace: metallb-system
+spec:
+  addresses:
+  - 172.17.0.80-172.17.0.90
+  serviceAllocation:
+    namespaces:
+    - openstack
+---
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: openstack-storage
+  namespace: metallb-system
+spec:
+  addresses:
+  - 172.18.0.80-172.18.0.90
+  serviceAllocation:
+    namespaces:
+    - openstack
+---
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: openstack-tenant
+  namespace: metallb-system
+spec:
+  addresses:
+  - 172.19.0.80-172.19.0.90
+  serviceAllocation:
+    namespaces:
+    - openstack
+---
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: openstack-designateext
+  namespace: metallb-system
+spec:
+  autoAssign: false
+  addresses:
+  - 172.50.0.80-172.50.0.90
+  serviceAllocation:
+    namespaces:
+    - openstack
+---
+# OpenStack Instance 2 pools
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: openstack2-ctlplane
+  namespace: metallb-system
+spec:
+  addresses:
+  - 192.168.122.100-192.168.122.110
+  serviceAllocation:
+    namespaces:
+    - openstack2
+---
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: openstack2-internalapi
+  namespace: metallb-system
+spec:
+  addresses:
+  - 172.27.0.80-172.27.0.90
+  serviceAllocation:
+    namespaces:
+    - openstack2
+---
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: openstack2-storage
+  namespace: metallb-system
+spec:
+  addresses:
+  - 172.29.0.80-172.29.0.90
+  serviceAllocation:
+    namespaces:
+    - openstack2
+---
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: openstack2-tenant
+  namespace: metallb-system
+spec:
+  addresses:
+  - 172.31.0.80-172.31.0.90
+  serviceAllocation:
+    namespaces:
+    - openstack2
+---
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: openstack2-designateext
+  namespace: metallb-system
+spec:
+  autoAssign: false
+  addresses:
+  - 172.51.0.80-172.51.0.90
+  serviceAllocation:
+    namespaces:
+    - openstack2
+---
+# L2 Advertisements
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: ctlplane
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+  - openstack-ctlplane
+  - openstack2-ctlplane
+  interfaces:
+  - ospbr
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: internalapi
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+  - openstack-internalapi
+  - openstack2-internalapi
+  interfaces:
+  - enp6s0.20
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: storage
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+  - openstack-storage
+  - openstack2-storage
+  interfaces:
+  - enp6s0.21
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: tenant
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+  - openstack-tenant
+  - openstack2-tenant
+  interfaces:
+  - enp6s0.22
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: designateext
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+  - openstack-designateext
+  - openstack2-designateext
+  interfaces:
+  - enp6s0.26

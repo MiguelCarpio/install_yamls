@@ -46,6 +46,11 @@ CLEANUP_DIR_CMD					 ?= rm -Rf
 # be also cloned from OPENSTACK_REPO/OPENSTACK_BRANCH.
 CHECKOUT_FROM_OPENSTACK_REF	?= false
 
+# Multi-RHOSO deployment support
+# Set RHOSO_INSTANCE_NAME to enable unique naming for MetalLB resources
+# Example: RHOSO_INSTANCE_NAME=rhoso1 or RHOSO_INSTANCE_NAME=rhoso2
+RHOSO_INSTANCE_NAME ?=
+
 NETWORK_INTERNALAPI_ADDRESS_PREFIX 	?= 172.17.0
 NETWORK_STORAGE_ADDRESS_PREFIX 	?= 172.18.0
 NETWORK_TENANT_ADDRESS_PREFIX 	?= 172.19.0
@@ -844,6 +849,8 @@ openstack_deploy: input openstack_deploy_prep netconfig_deploy ## installs the s
 	$(eval $(call vars,$@,openstack))
 	make wait
 	bash scripts/operator-deploy-resources.sh
+	@echo "Patching MetalLB pool annotations for namespace ${NAMESPACE}..."
+	NAMESPACE=${NAMESPACE} bash scripts/patch-openstack-metallb-pools.sh
 
 .PHONY: openstack_wait_deploy
 openstack_wait_deploy: openstack_deploy ## waits for ctlplane readiness. Runs prep step in advance. Set OPENSTACK_REPO and OPENSTACK_BRANCH to deploy from a custom repo.
@@ -1155,6 +1162,10 @@ netconfig_deploy_prep: netconfig_deploy_cleanup ## prepares the CR to install th
 ifeq ($(NETWORK_ISOLATION_USE_DEFAULT_NETWORK), false)
 	sed -i 's/192.168.122/${NNCP_CTLPLANE_IP_ADDRESS_PREFIX}/g' ${DEPLOY_DIR}/$(notdir ${NETCONFIG_CR})
 endif
+	sed -i 's/172\.17\.0/${NETWORK_INTERNALAPI_ADDRESS_PREFIX}/g' ${DEPLOY_DIR}/$(notdir ${NETCONFIG_CR})
+	sed -i 's/172\.18\.0/${NETWORK_STORAGE_ADDRESS_PREFIX}/g' ${DEPLOY_DIR}/$(notdir ${NETCONFIG_CR})
+	sed -i 's/172\.19\.0/${NETWORK_TENANT_ADDRESS_PREFIX}/g' ${DEPLOY_DIR}/$(notdir ${NETCONFIG_CR})
+	sed -i 's/172\.20\.0/${NETWORK_STORAGEMGMT_ADDRESS_PREFIX}/g' ${DEPLOY_DIR}/$(notdir ${NETCONFIG_CR})
 	bash scripts/gen-service-kustomize.sh
 
 .PHONY: netconfig_deploy
@@ -2418,16 +2429,27 @@ nncp: export STORAGE_MACVLAN=${NETWORK_STORAGE_MACVLAN}
 ## NOTE(ldenny): When applying the nncp resource the OCP API can momentarly drop, below retry is added to aviod checking status while API is down and failing.
 nncp: ## installs the nncp resources to configure the interface connected to the edpm node, right now only single nic vlan. Interface referenced via NNCP_INTERFACE
 	$(eval $(call vars,$@,nncp))
+	@if test -n "${RHOSO_INSTANCE_NAME}" && test "${RHOSO_INSTANCE_NAME}" != "rhoso1" && test "${RHOSO_INSTANCE_NAME}" != "openstack"; then \
+		echo ""; \
+		echo "========================================"; \
+		echo "Multi-RHOSO Instance Detected: ${RHOSO_INSTANCE_NAME}"; \
+		echo "Skipping NNCP generation (already exists from first instance)"; \
+		echo "Adding secondary IPs to CRC node..."; \
+		echo "========================================"; \
+		bash scripts/add-nncp-secondary-ips.sh || echo "Warning: Failed to add secondary IPs. This is required for MetalLB to work with multiple instances."; \
+	else \
+		echo "First RHOSO instance - generating and applying NNCP configuration"; \
 ifeq ($(NNCP_NODES),)
-	WORKERS='$(shell oc get nodes -l node-role.kubernetes.io/worker -o jsonpath="{.items[*].metadata.name}")' \
-	bash scripts/gen-nncp.sh
+		WORKERS='$(shell oc get nodes -l node-role.kubernetes.io/worker -o jsonpath="{.items[*].metadata.name}")' \
+		bash scripts/gen-nncp.sh; \
 else
-	WORKERS=${NNCP_NODES} bash scripts/gen-nncp.sh
+		WORKERS=${NNCP_NODES} bash scripts/gen-nncp.sh; \
 endif
-	oc apply -f ${DEPLOY_DIR}/
-	timeout ${NNCP_TIMEOUT} bash -c "while ! (oc wait nncp -l osp/interface=${NNCP_INTERFACE} --for jsonpath='{.status.conditions[0].reason}'=SuccessfullyConfigured); do sleep 10; done"
-	if test -n "${DNS_SERVER}"; then oc patch dns.operator/default --type merge -p '{"spec":{"upstreamResolvers":{"policy":"Sequential","upstreams":[{"type":"Network","address":"'${DNS_SERVER}'","port":53},{"type":"SystemResolvConf"}]}}}'; fi
-	timeout ${NNCP_TIMEOUT} bash -c "while ! (oc wait dns.operator/default --for condition=available); do sleep 10; done"
+		oc apply -f ${DEPLOY_DIR}/; \
+		timeout ${NNCP_TIMEOUT} bash -c "while ! (oc wait nncp -l osp/interface=${NNCP_INTERFACE} --for jsonpath='{.status.conditions[0].reason}'=SuccessfullyConfigured); do sleep 10; done"; \
+		if test -n "${DNS_SERVER}"; then oc patch dns.operator/default --type merge -p '{"spec":{"upstreamResolvers":{"policy":"Sequential","upstreams":[{"type":"Network","address":"'${DNS_SERVER}'","port":53},{"type":"SystemResolvConf"}]}}}'; fi; \
+		timeout ${NNCP_TIMEOUT} bash -c "while ! (oc wait dns.operator/default --for condition=available); do sleep 10; done"; \
+	fi
 
 
 .PHONY: nncp_cleanup
@@ -2509,7 +2531,7 @@ endif
 	oc wait pod -n ${NAMESPACE} -l component=speaker --for condition=Ready --timeout=$(TIMEOUT)
 
 .PHONY: metallb_config
-metallb_config: export NAMESPACE=metallb-system
+metallb_config: export OPENSTACK_NAMESPACE=${NAMESPACE}
 metallb_config: export CTLPLANE_METALLB_POOL=${METALLB_POOL}
 metallb_config: export CTLPLANE_METALLB_IPV6_POOL=${METALLB_IPV6_POOL}
 metallb_config: export INTERNALAPI_PREFIX=${NETWORK_INTERNALAPI_ADDRESS_PREFIX}

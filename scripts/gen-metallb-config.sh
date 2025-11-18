@@ -59,6 +59,24 @@ echo DEPLOY_DIR ${DEPLOY_DIR}
 echo INTERFACE ${INTERFACE}
 echo CTLPLANE_METALLB_POOL ${CTLPLANE_METALLB_POOL}
 echo CTLPLANE_METALLB_IPV6_POOL ${CTLPLANE_METALLB_IPV6_POOL}
+echo RHOSO_INSTANCE_NAME ${RHOSO_INSTANCE_NAME}
+
+# Multi-RHOSO support: Use namespace-prefixed pool names
+# Pool names include namespace prefix to ensure uniqueness
+# Example: openstack-internalapi, openstack2-internalapi
+# Requires kustomize patches to update service annotations
+if [ -n "${OPENSTACK_NAMESPACE}" ]; then
+    echo "Multi-RHOSO mode: Creating prefixed pools for namespace '${OPENSTACK_NAMESPACE}'"
+    USE_NAMESPACE_SCOPING=true
+    NAMESPACE="${OPENSTACK_NAMESPACE}"
+    POOL_PREFIX="${OPENSTACK_NAMESPACE}-"
+    L2ADV_SUFFIX="-${OPENSTACK_NAMESPACE}"
+else
+    echo "Single RHOSO mode: No namespace prefix"
+    USE_NAMESPACE_SCOPING=false
+    POOL_PREFIX=""
+    L2ADV_SUFFIX=""
+fi
 
 cat > ${DEPLOY_DIR}/ipaddresspools.yaml <<EOF_CAT
 ---
@@ -66,7 +84,7 @@ apiVersion: metallb.io/v1beta1
 kind: IPAddressPool
 metadata:
   namespace: metallb-system
-  name: ctlplane
+  name: ${POOL_PREFIX}ctlplane
 spec:
   addresses:
 EOF_CAT
@@ -80,13 +98,20 @@ if [ -n "$IPV6_ENABLED" ]; then
   - ${CTLPLANE_METALLB_IPV6_POOL}
 EOF_CAT
 fi
+if [ "${USE_NAMESPACE_SCOPING}" = "true" ]; then
+    cat >> ${DEPLOY_DIR}/ipaddresspools.yaml <<EOF_CAT
+  serviceAllocation:
+    namespaces:
+    - ${NAMESPACE}
+EOF_CAT
+fi
 cat >> ${DEPLOY_DIR}/ipaddresspools.yaml <<EOF_CAT
 ---
 apiVersion: metallb.io/v1beta1
 kind: IPAddressPool
 metadata:
   namespace: metallb-system
-  name: internalapi
+  name: ${POOL_PREFIX}internalapi
 spec:
   addresses:
 EOF_CAT
@@ -100,13 +125,20 @@ if [ -n "$IPV6_ENABLED" ]; then
   - fd00:bbbb::80-fd00:bbbb::90
 EOF_CAT
 fi
+if [ "${USE_NAMESPACE_SCOPING}" = "true" ]; then
+    cat >> ${DEPLOY_DIR}/ipaddresspools.yaml <<EOF_CAT
+  serviceAllocation:
+    namespaces:
+    - ${NAMESPACE}
+EOF_CAT
+fi
 cat >> ${DEPLOY_DIR}/ipaddresspools.yaml <<EOF_CAT
 ---
 apiVersion: metallb.io/v1beta1
 kind: IPAddressPool
 metadata:
   namespace: metallb-system
-  name: storage
+  name: ${POOL_PREFIX}storage
 spec:
   addresses:
 EOF_CAT
@@ -120,13 +152,20 @@ if [ -n "$IPV6_ENABLED" ]; then
   - fd00:cccc::80-fd00:cccc::90
 EOF_CAT
 fi
+if [ "${USE_NAMESPACE_SCOPING}" = "true" ]; then
+    cat >> ${DEPLOY_DIR}/ipaddresspools.yaml <<EOF_CAT
+  serviceAllocation:
+    namespaces:
+    - ${NAMESPACE}
+EOF_CAT
+fi
 cat >> ${DEPLOY_DIR}/ipaddresspools.yaml <<EOF_CAT
 ---
 apiVersion: metallb.io/v1beta1
 kind: IPAddressPool
 metadata:
   namespace: metallb-system
-  name: tenant
+  name: ${POOL_PREFIX}tenant
 spec:
   addresses:
 EOF_CAT
@@ -140,13 +179,20 @@ if [ -n "$IPV6_ENABLED" ]; then
   - fd00:dddd::80-fd00:dddd::90
 EOF_CAT
 fi
+if [ "${USE_NAMESPACE_SCOPING}" = "true" ]; then
+    cat >> ${DEPLOY_DIR}/ipaddresspools.yaml <<EOF_CAT
+  serviceAllocation:
+    namespaces:
+    - ${NAMESPACE}
+EOF_CAT
+fi
 cat >> ${DEPLOY_DIR}/ipaddresspools.yaml <<EOF_CAT
 ---
 apiVersion: metallb.io/v1beta1
 kind: IPAddressPool
 metadata:
   namespace: metallb-system
-  name: designateext
+  name: ${POOL_PREFIX}designateext
 spec:
   autoAssign: false
   addresses:
@@ -161,61 +207,68 @@ if [ -n "$IPV6_ENABLED" ]; then
   - fd00:eaea::80-fd00:eaea::90
 EOF_CAT
 fi
+if [ "${USE_NAMESPACE_SCOPING}" = "true" ]; then
+    cat >> ${DEPLOY_DIR}/ipaddresspools.yaml <<EOF_CAT
+  serviceAllocation:
+    namespaces:
+    - ${NAMESPACE}
+EOF_CAT
+fi
 
 cat > ${DEPLOY_DIR}/l2advertisement.yaml <<EOF_CAT
 ---
 apiVersion: metallb.io/v1beta1
 kind: L2Advertisement
 metadata:
-  name: ctlplane
+  name: ${POOL_PREFIX}ctlplane
   namespace: metallb-system
 spec:
   ipAddressPools:
-  - ctlplane
+  - ${POOL_PREFIX}ctlplane
   interfaces:
   - ${BRIDGE_NAME}
 ---
 apiVersion: metallb.io/v1beta1
 kind: L2Advertisement
 metadata:
-  name: internalapi
+  name: ${POOL_PREFIX}internalapi
   namespace: metallb-system
 spec:
   ipAddressPools:
-  - internalapi
+  - ${POOL_PREFIX}internalapi
   interfaces:
   - ${INTERFACE}.20
 ---
 apiVersion: metallb.io/v1beta1
 kind: L2Advertisement
 metadata:
-  name: storage
+  name: ${POOL_PREFIX}storage
   namespace: metallb-system
 spec:
   ipAddressPools:
-  - storage
+  - ${POOL_PREFIX}storage
   interfaces:
   - ${INTERFACE}.21
 ---
 apiVersion: metallb.io/v1beta1
 kind: L2Advertisement
 metadata:
-  name: tenant
+  name: ${POOL_PREFIX}tenant
   namespace: metallb-system
 spec:
   ipAddressPools:
-  - tenant
+  - ${POOL_PREFIX}tenant
   interfaces:
   - ${INTERFACE}.22
 ---
 apiVersion: metallb.io/v1beta1
 kind: L2Advertisement
 metadata:
-  name: designateext
+  name: ${POOL_PREFIX}designateext
   namespace: metallb-system
 spec:
   ipAddressPools:
-  - designateext
+  - ${POOL_PREFIX}designateext
   interfaces:
   - ${INTERFACE}.26
 EOF_CAT
@@ -224,7 +277,7 @@ cat > ${DEPLOY_DIR}/bgppeers.yaml <<EOF_CAT
 apiVersion: metallb.io/v1beta2
 kind: BGPPeer
 metadata:
-  name: bgp-peer
+  name: ${POOL_PREFIX}bgp-peer
   namespace: metallb-system
 spec:
   myASN: ${ASN}
@@ -236,7 +289,7 @@ spec:
 apiVersion: metallb.io/v1beta2
 kind: BGPPeer
 metadata:
-  name: bgp-peer-2
+  name: ${POOL_PREFIX}bgp-peer-2
   namespace: metallb-system
 spec:
   myASN: ${ASN}
@@ -250,18 +303,18 @@ cat > ${DEPLOY_DIR}/bgpadvertisement.yaml <<EOF_CAT
 apiVersion: metallb.io/v1beta1
 kind: BGPAdvertisement
 metadata:
-  name: bgpadvertisement
+  name: ${POOL_PREFIX}bgpadvertisement
   namespace: metallb-system
 spec:
   ipAddressPools:
-  - ctlplane
-  - internalapi
-  - storage
-  - tenant
-  - designateext
+  - ${POOL_PREFIX}ctlplane
+  - ${POOL_PREFIX}internalapi
+  - ${POOL_PREFIX}storage
+  - ${POOL_PREFIX}tenant
+  - ${POOL_PREFIX}designateext
   peers:
-  - bgp-peer
-  - bgp-peer-2
+  - ${POOL_PREFIX}bgp-peer
+  - ${POOL_PREFIX}bgp-peer-2
 EOF_CAT
 cat > ${DEPLOY_DIR}/bgpextras.yaml << EOF_CAT
 ---
